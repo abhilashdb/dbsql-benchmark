@@ -52,15 +52,13 @@ permission on the target warehouse.
 9. **QRC hit rate** - enriches the run's rows with Query History API metrics (cache hit, queue
    wait, server-side total time) via a rate-limited client, then prints a summary.
 
-## Known caveat: query 5 (unbounded window function)
+## Note on unbounded queries
 
-`queries/5.sql` has no `LIMIT` - it ranks orders per customer and can return a very large result
-set. The Python SQL Connector's `cursor.execute()` blocks until it has fully resolved the result
-before `fetchmany()` can slice it, so this query's *client-observed* latency can be dominated by
-result materialization/transfer time under concurrency, even though the warehouse itself finishes
-quickly (verified via Query History: `server_total_time_ms` stays low while client latency spikes).
-This is inherent to the connector's handling of large, unbounded results - it reproduces
-identically whether using the default Thrift path or `use_kernel=True` (Statement Execution API).
-If you want apples-to-apples client latency across all queries, cap result size at the SQL level
-(e.g. wrap with an outer `LIMIT`) - just be aware that adds a non-Photon `CollectLimit` step, so
-it's a tradeoff, not a free fix.
+If a query in your set has no `LIMIT` and can return a large result, the Python SQL Connector's
+`cursor.execute()` blocks until the full result is resolved before `fetchmany()` can slice it - so
+client-observed latency for that query can be dominated by result materialization/transfer time
+under concurrency, even when the warehouse itself finishes quickly. This is inherent to the
+connector's handling of large, unbounded results and reproduces identically on the default Thrift
+path or `use_kernel=True` (Statement Execution API). For apples-to-apples client latency across
+your queries, cap result size at the SQL level (e.g. wrap with an outer `LIMIT`) - just be aware
+that adds a non-Photon `CollectLimit` step, so it's a tradeoff, not a free fix.
