@@ -1,0 +1,1618 @@
+{
+  "datasets": [
+    {
+      "name": "last_10_runs",
+      "displayName": "Last 10 Runs Summary",
+      "queryLines": [
+        "SELECT\n",
+        "  run_id,\n",
+        "  run_name,\n",
+        "  run_start_ts,\n",
+        "  warehouse_size,\n",
+        "  total_queries,\n",
+        "  peak_concurrency,\n",
+        "  p50_latency_ms,\n",
+        "  p90_latency_ms,\n",
+        "  p99_latency_ms,\n",
+        "  throughput_qps,\n",
+        "  pct_qrc_hit,\n",
+        "  pct_queued,\n",
+        "  avg_queue_wait_ms,\n",
+        "  client_vs_server_gap_ms\n",
+        "FROM\n",
+        "  (\n",
+        "    SELECT\n",
+        "      r.run_id,\n",
+        "      r.run_name,\n",
+        "      r.run_start_ts,\n",
+        "      r.warehouse_size,\n",
+        "      COUNT(*) AS total_queries,\n",
+        "      MAX(r.target_concurrency) AS peak_concurrency,\n",
+        "      approx_percentile(r.latency_ms, 0.5) AS p50_latency_ms,\n",
+        "      approx_percentile(r.latency_ms, 0.9) AS p90_latency_ms,\n",
+        "      approx_percentile(r.latency_ms, 0.99) AS p99_latency_ms,\n",
+        "      COUNT(*)\n",
+        "        / GREATEST(\n",
+        "          unix_timestamp(MAX(r.end_ts)) - unix_timestamp(MIN(r.start_ts)),\n",
+        "          1\n",
+        "        ) AS throughput_qps,\n",
+        "      100.0\n",
+        "        * SUM(\n",
+        "          CASE\n",
+        "            WHEN r.qrc_hit THEN 1\n",
+        "            ELSE 0\n",
+        "          END\n",
+        "        )\n",
+        "        / COUNT(*) AS pct_qrc_hit,\n",
+        "      100.0\n",
+        "        * SUM(\n",
+        "          CASE\n",
+        "            WHEN\n",
+        "              r.queue_wait_ms > 0\n",
+        "              OR r.provisioning_wait_ms > 0\n",
+        "            THEN\n",
+        "              1\n",
+        "            ELSE 0\n",
+        "          END\n",
+        "        )\n",
+        "        / COUNT(*) AS pct_queued,\n",
+        "      AVG(r.queue_wait_ms) AS avg_queue_wait_ms,\n",
+        "      ROUND(\n",
+        "        approx_percentile(r.latency_ms, 0.5) - approx_percentile(r.server_total_time_ms, 0.5),\n",
+        "        1\n",
+        "      ) AS client_vs_server_gap_ms\n",
+        "    FROM\n",
+        "      sql_benchmark_results r\n",
+        "    GROUP BY\n",
+        "      r.run_id,\n",
+        "      r.run_name,\n",
+        "      r.run_start_ts,\n",
+        "      r.warehouse_size\n",
+        "  )\n",
+        "ORDER BY\n",
+        "  run_start_ts DESC\n",
+        "LIMIT 10"
+      ],
+      "catalog": "main",
+      "schema": "default"
+    },
+    {
+      "name": "concurrency_comparison",
+      "displayName": "Latency by Concurrency Step (A vs B)",
+      "queryLines": [
+        "SELECT\n",
+        "  'Run A' AS run_label,\n",
+        "  target_concurrency,\n",
+        "  approx_percentile(server_total_time_ms, 0.5) AS p50_latency_ms\n",
+        "FROM\n",
+        "  sql_benchmark_results\n",
+        "WHERE\n",
+        "  run_id = split_part(:run_id_a, ' | ', 1)\n",
+        "  AND server_total_time_ms IS NOT NULL\n",
+        "GROUP BY\n",
+        "  target_concurrency\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  'Run B' AS run_label,\n",
+        "  target_concurrency,\n",
+        "  approx_percentile(server_total_time_ms, 0.5) AS p50_latency_ms\n",
+        "FROM\n",
+        "  sql_benchmark_results\n",
+        "WHERE\n",
+        "  run_id = split_part(:run_id_b, ' | ', 1)\n",
+        "  AND server_total_time_ms IS NOT NULL\n",
+        "GROUP BY\n",
+        "  target_concurrency"
+      ],
+      "parameters": [
+        {
+          "displayName": "Run A",
+          "keyword": "run_id_a",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Run B",
+          "keyword": "run_id_b",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        }
+      ],
+      "catalog": "main",
+      "schema": "default"
+    },
+    {
+      "name": "run_a_stats",
+      "displayName": "Run A Stats",
+      "queryLines": [
+        "SELECT\n",
+        "  r.run_id,\n",
+        "  r.run_name,\n",
+        "  r.run_start_ts,\n",
+        "  r.warehouse_size,\n",
+        "  COUNT(*) AS total_queries,\n",
+        "  MAX(r.target_concurrency) AS peak_concurrency,\n",
+        "  approx_percentile(r.latency_ms, 0.5) AS p50_latency_ms,\n",
+        "  approx_percentile(r.latency_ms, 0.9) AS p90_latency_ms,\n",
+        "  approx_percentile(r.latency_ms, 0.99) AS p99_latency_ms,\n",
+        "  COUNT(*)\n",
+        "    / GREATEST(\n",
+        "      unix_timestamp(MAX(r.end_ts)) - unix_timestamp(MIN(r.start_ts)),\n",
+        "      1\n",
+        "    ) AS throughput_qps,\n",
+        "  100.0\n",
+        "    * SUM(\n",
+        "      CASE\n",
+        "        WHEN r.qrc_hit THEN 1\n",
+        "        ELSE 0\n",
+        "      END\n",
+        "    )\n",
+        "    / COUNT(*) AS pct_qrc_hit,\n",
+        "  100.0\n",
+        "    * SUM(\n",
+        "      CASE\n",
+        "        WHEN\n",
+        "          r.queue_wait_ms > 0\n",
+        "          OR r.provisioning_wait_ms > 0\n",
+        "        THEN\n",
+        "          1\n",
+        "        ELSE 0\n",
+        "      END\n",
+        "    )\n",
+        "    / COUNT(*) AS pct_queued,\n",
+        "  AVG(r.queue_wait_ms) AS avg_queue_wait_ms,\n",
+        "  ROUND(\n",
+        "    approx_percentile(r.latency_ms, 0.5) - approx_percentile(r.server_total_time_ms, 0.5),\n",
+        "    1\n",
+        "  ) AS client_vs_server_gap_ms\n",
+        "FROM\n",
+        "  sql_benchmark_results r\n",
+        "WHERE\n",
+        "  r.run_id = split_part(:run_id_a, ' | ', 1)\n",
+        "GROUP BY\n",
+        "  r.run_id,\n",
+        "  r.run_name,\n",
+        "  r.run_start_ts,\n",
+        "  r.warehouse_size"
+      ],
+      "parameters": [
+        {
+          "displayName": "Run A ID",
+          "keyword": "run_id_a",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        }
+      ],
+      "catalog": "main",
+      "schema": "default"
+    },
+    {
+      "name": "run_b_stats",
+      "displayName": "Run B Stats",
+      "queryLines": [
+        "SELECT\n",
+        "  r.run_id,\n",
+        "  r.run_name,\n",
+        "  r.run_start_ts,\n",
+        "  r.warehouse_size,\n",
+        "  COUNT(*) AS total_queries,\n",
+        "  MAX(r.target_concurrency) AS peak_concurrency,\n",
+        "  approx_percentile(r.latency_ms, 0.5) AS p50_latency_ms,\n",
+        "  approx_percentile(r.latency_ms, 0.9) AS p90_latency_ms,\n",
+        "  approx_percentile(r.latency_ms, 0.99) AS p99_latency_ms,\n",
+        "  COUNT(*)\n",
+        "    / GREATEST(\n",
+        "      unix_timestamp(MAX(r.end_ts)) - unix_timestamp(MIN(r.start_ts)),\n",
+        "      1\n",
+        "    ) AS throughput_qps,\n",
+        "  100.0\n",
+        "    * SUM(\n",
+        "      CASE\n",
+        "        WHEN r.qrc_hit THEN 1\n",
+        "        ELSE 0\n",
+        "      END\n",
+        "    )\n",
+        "    / COUNT(*) AS pct_qrc_hit,\n",
+        "  100.0\n",
+        "    * SUM(\n",
+        "      CASE\n",
+        "        WHEN\n",
+        "          r.queue_wait_ms > 0\n",
+        "          OR r.provisioning_wait_ms > 0\n",
+        "        THEN\n",
+        "          1\n",
+        "        ELSE 0\n",
+        "      END\n",
+        "    )\n",
+        "    / COUNT(*) AS pct_queued,\n",
+        "  AVG(r.queue_wait_ms) AS avg_queue_wait_ms,\n",
+        "  ROUND(\n",
+        "    approx_percentile(r.latency_ms, 0.5) - approx_percentile(r.server_total_time_ms, 0.5),\n",
+        "    1\n",
+        "  ) AS client_vs_server_gap_ms\n",
+        "FROM\n",
+        "  sql_benchmark_results r\n",
+        "WHERE\n",
+        "  r.run_id = split_part(:run_id_b, ' | ', 1)\n",
+        "GROUP BY\n",
+        "  r.run_id,\n",
+        "  r.run_name,\n",
+        "  r.run_start_ts,\n",
+        "  r.warehouse_size"
+      ],
+      "parameters": [
+        {
+          "displayName": "Run B ID",
+          "keyword": "run_id_b",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        }
+      ],
+      "catalog": "main",
+      "schema": "default"
+    },
+    {
+      "name": "run_options",
+      "displayName": "Run Options",
+      "queryLines": [
+        "SELECT\n",
+        "  run_id,\n",
+        "  run_name,\n",
+        "  run_start_ts,\n",
+        "  concat(run_id, ' | ', coalesce(run_name, 'None')) AS run_label\n",
+        "FROM\n",
+        "  (\n",
+        "    SELECT DISTINCT\n",
+        "      run_id,\n",
+        "      run_name,\n",
+        "      run_start_ts\n",
+        "    FROM\n",
+        "      sql_benchmark_results\n",
+        "  )\n",
+        "ORDER BY\n",
+        "  run_id DESC"
+      ],
+      "catalog": "main",
+      "schema": "default"
+    },
+    {
+      "name": "run_comparison_vertical",
+      "displayName": "Run A vs B Comparison (Vertical)",
+      "queryLines": [
+        "WITH agg AS (\n",
+        "  SELECT\n",
+        "    run_id,\n",
+        "    MAX(run_name) AS run_name,\n",
+        "    MAX(run_start_ts) AS run_start_ts,\n",
+        "    MAX(warehouse_size) AS warehouse_size,\n",
+        "    MAX(warehouse_min_clusters) AS min_clusters,\n",
+        "    MAX(warehouse_max_clusters) AS max_clusters,\n",
+        "    COUNT(*) AS total_queries,\n",
+        "    MAX(target_concurrency) AS peak_concurrency,\n",
+        "    approx_percentile(latency_ms, 0.5) AS p50_latency_ms,\n",
+        "    approx_percentile(latency_ms, 0.9) AS p90_latency_ms,\n",
+        "    approx_percentile(latency_ms, 0.99) AS p99_latency_ms,\n",
+        "    COUNT(*)\n",
+        "      / GREATEST(unix_timestamp(MAX(end_ts)) - unix_timestamp(MIN(start_ts)), 1) AS throughput_qps,\n",
+        "    100.0\n",
+        "      * SUM(\n",
+        "        CASE\n",
+        "          WHEN qrc_hit THEN 1\n",
+        "          ELSE 0\n",
+        "        END\n",
+        "      )\n",
+        "      / COUNT(*) AS pct_qrc_hit,\n",
+        "    100.0\n",
+        "      * SUM(\n",
+        "        CASE\n",
+        "          WHEN\n",
+        "            queue_wait_ms > 0\n",
+        "            OR provisioning_wait_ms > 0\n",
+        "          THEN\n",
+        "            1\n",
+        "          ELSE 0\n",
+        "        END\n",
+        "      )\n",
+        "      / COUNT(*) AS pct_queued,\n",
+        "    AVG(queue_wait_ms) AS avg_queue_wait_ms,\n",
+        "    ROUND(\n",
+        "      approx_percentile(latency_ms, 0.5) - approx_percentile(server_total_time_ms, 0.5),\n",
+        "      1\n",
+        "    ) AS client_vs_server_gap_ms\n",
+        "  FROM\n",
+        "    sql_benchmark_results\n",
+        "  WHERE\n",
+        "    run_id IN (split_part(:run_id_a, ' | ', 1), split_part(:run_id_b, ' | ', 1))\n",
+        "  GROUP BY\n",
+        "    run_id\n",
+        "),\n",
+        "a AS (\n",
+        "  SELECT\n",
+        "    *\n",
+        "  FROM\n",
+        "    agg\n",
+        "  WHERE\n",
+        "    run_id = split_part(:run_id_a, ' | ', 1)\n",
+        "),\n",
+        "b AS (\n",
+        "  SELECT\n",
+        "    *\n",
+        "  FROM\n",
+        "    agg\n",
+        "  WHERE\n",
+        "    run_id = split_part(:run_id_b, ' | ', 1)\n",
+        ")\n",
+        "SELECT\n",
+        "  stack(\n",
+        "    14,\n",
+        "    1,\n",
+        "    'Run Name',\n",
+        "    CAST(coalesce(a.run_name, 'None') AS STRING),\n",
+        "    CAST(coalesce(b.run_name, 'None') AS STRING),\n",
+        "    2,\n",
+        "    'Start Time',\n",
+        "    CAST(a.run_start_ts AS STRING),\n",
+        "    CAST(b.run_start_ts AS STRING),\n",
+        "    3,\n",
+        "    'Warehouse Size',\n",
+        "    a.warehouse_size,\n",
+        "    b.warehouse_size,\n",
+        "    4,\n",
+        "    'Autoscaling Range',\n",
+        "    CAST(a.min_clusters AS STRING) || ' - ' || CAST(a.max_clusters AS STRING),\n",
+        "    CAST(b.min_clusters AS STRING) || ' - ' || CAST(b.max_clusters AS STRING),\n",
+        "    5,\n",
+        "    'Total Queries',\n",
+        "    CAST(a.total_queries AS STRING),\n",
+        "    CAST(b.total_queries AS STRING),\n",
+        "    6,\n",
+        "    'Peak Concurrency',\n",
+        "    CAST(a.peak_concurrency AS STRING),\n",
+        "    CAST(b.peak_concurrency AS STRING),\n",
+        "    7,\n",
+        "    'P50 Latency (ms)',\n",
+        "    CAST(ROUND(a.p50_latency_ms, 1) AS STRING),\n",
+        "    CAST(ROUND(b.p50_latency_ms, 1) AS STRING),\n",
+        "    8,\n",
+        "    'P90 Latency (ms)',\n",
+        "    CAST(ROUND(a.p90_latency_ms, 1) AS STRING),\n",
+        "    CAST(ROUND(b.p90_latency_ms, 1) AS STRING),\n",
+        "    9,\n",
+        "    'P99 Latency (ms)',\n",
+        "    CAST(ROUND(a.p99_latency_ms, 1) AS STRING),\n",
+        "    CAST(ROUND(b.p99_latency_ms, 1) AS STRING),\n",
+        "    10,\n",
+        "    'Throughput (QPS)',\n",
+        "    CAST(ROUND(a.throughput_qps, 2) AS STRING),\n",
+        "    CAST(ROUND(b.throughput_qps, 2) AS STRING),\n",
+        "    11,\n",
+        "    'QRC Hit %',\n",
+        "    CAST(ROUND(a.pct_qrc_hit, 1) AS STRING),\n",
+        "    CAST(ROUND(b.pct_qrc_hit, 1) AS STRING),\n",
+        "    12,\n",
+        "    '% Queued',\n",
+        "    CAST(ROUND(a.pct_queued, 1) AS STRING),\n",
+        "    CAST(ROUND(b.pct_queued, 1) AS STRING),\n",
+        "    13,\n",
+        "    'Avg Queue Wait (ms)',\n",
+        "    CAST(ROUND(a.avg_queue_wait_ms, 1) AS STRING),\n",
+        "    CAST(ROUND(b.avg_queue_wait_ms, 1) AS STRING),\n",
+        "    14,\n",
+        "    'Client vs Server Gap (ms)',\n",
+        "    COALESCE(CAST(a.client_vs_server_gap_ms AS STRING), 'N/A'),\n",
+        "    COALESCE(CAST(b.client_vs_server_gap_ms AS STRING), 'N/A')\n",
+        "  ) AS (sort_order, metric, run_a, run_b)\n",
+        "FROM\n",
+        "  a CROSS JOIN b\n",
+        "ORDER BY\n",
+        "  sort_order"
+      ],
+      "parameters": [
+        {
+          "displayName": "Run A ID",
+          "keyword": "run_id_a",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Run B ID",
+          "keyword": "run_id_b",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        }
+      ],
+      "catalog": "main",
+      "schema": "default"
+    },
+    {
+      "name": "ramp_curve_a",
+      "displayName": "Ramp Curve (Run A)",
+      "queryLines": [
+        "WITH ramp_curve AS (\n",
+        "  SELECT\n",
+        "    CAST(unix_timestamp(start_ts) - unix_timestamp(MIN(start_ts) OVER ()) AS INT) AS elapsed_sec,\n",
+        "    target_concurrency,\n",
+        "    server_total_time_ms\n",
+        "  FROM\n",
+        "    sql_benchmark_results\n",
+        "  WHERE\n",
+        "    run_id = split_part(:run_id_a, ' | ', 1)\n",
+        "    AND server_total_time_ms IS NOT NULL\n",
+        "),\n",
+        "agg AS (\n",
+        "  SELECT\n",
+        "    elapsed_sec,\n",
+        "    MAX(target_concurrency) AS concurrency,\n",
+        "    approx_percentile(server_total_time_ms, 0.5) AS p50_latency_ms,\n",
+        "    approx_percentile(server_total_time_ms, 0.9) AS p90_latency_ms,\n",
+        "    approx_percentile(server_total_time_ms, 0.99) AS p99_latency_ms,\n",
+        "    COUNT(*) AS queries_started\n",
+        "  FROM\n",
+        "    ramp_curve\n",
+        "  GROUP BY\n",
+        "    elapsed_sec\n",
+        ")\n",
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  agg\n",
+        "WHERE\n",
+        "  elapsed_sec\n",
+        "    < (\n",
+        "      SELECT\n",
+        "        MAX(elapsed_sec)\n",
+        "      FROM\n",
+        "        agg\n",
+        "    )\n",
+        "ORDER BY\n",
+        "  elapsed_sec"
+      ],
+      "parameters": [
+        {
+          "displayName": "Run A",
+          "keyword": "run_id_a",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        }
+      ],
+      "catalog": "main",
+      "schema": "default"
+    },
+    {
+      "name": "ramp_curve_b",
+      "displayName": "Ramp Curve (Run B)",
+      "queryLines": [
+        "WITH ramp_curve AS (\n",
+        "  SELECT\n",
+        "    CAST(unix_timestamp(start_ts) - unix_timestamp(MIN(start_ts) OVER ()) AS INT) AS elapsed_sec,\n",
+        "    target_concurrency,\n",
+        "    server_total_time_ms\n",
+        "  FROM\n",
+        "    sql_benchmark_results\n",
+        "  WHERE\n",
+        "    run_id = split_part(:run_id_b, ' | ', 1)\n",
+        "    AND server_total_time_ms IS NOT NULL\n",
+        "),\n",
+        "agg AS (\n",
+        "  SELECT\n",
+        "    elapsed_sec,\n",
+        "    MAX(target_concurrency) AS concurrency,\n",
+        "    approx_percentile(server_total_time_ms, 0.5) AS p50_latency_ms,\n",
+        "    approx_percentile(server_total_time_ms, 0.9) AS p90_latency_ms,\n",
+        "    approx_percentile(server_total_time_ms, 0.99) AS p99_latency_ms,\n",
+        "    COUNT(*) AS queries_started\n",
+        "  FROM\n",
+        "    ramp_curve\n",
+        "  GROUP BY\n",
+        "    elapsed_sec\n",
+        ")\n",
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  agg\n",
+        "WHERE\n",
+        "  elapsed_sec\n",
+        "    < (\n",
+        "      SELECT\n",
+        "        MAX(elapsed_sec)\n",
+        "      FROM\n",
+        "        agg\n",
+        "    )\n",
+        "ORDER BY\n",
+        "  elapsed_sec"
+      ],
+      "parameters": [
+        {
+          "displayName": "Run B",
+          "keyword": "run_id_b",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        }
+      ],
+      "catalog": "main",
+      "schema": "default"
+    },
+    {
+      "name": "queued_by_concurrency",
+      "displayName": "Queued Queries by Concurrency (A vs B)",
+      "queryLines": [
+        "WITH base_a AS (\n",
+        "  SELECT\n",
+        "    target_concurrency,\n",
+        "    queue_wait_ms,\n",
+        "    provisioning_wait_ms,\n",
+        "    CAST(unix_timestamp(start_ts) - unix_timestamp(MIN(start_ts) OVER ()) AS INT) AS elapsed_sec\n",
+        "  FROM\n",
+        "    sql_benchmark_results\n",
+        "  WHERE\n",
+        "    run_id = split_part(:run_id_a, ' | ', 1)\n",
+        "),\n",
+        "base_b AS (\n",
+        "  SELECT\n",
+        "    target_concurrency,\n",
+        "    queue_wait_ms,\n",
+        "    provisioning_wait_ms,\n",
+        "    CAST(unix_timestamp(start_ts) - unix_timestamp(MIN(start_ts) OVER ()) AS INT) AS elapsed_sec\n",
+        "  FROM\n",
+        "    sql_benchmark_results\n",
+        "  WHERE\n",
+        "    run_id = split_part(:run_id_b, ' | ', 1)\n",
+        ")\n",
+        "SELECT\n",
+        "  'Run A' AS run_label,\n",
+        "  target_concurrency,\n",
+        "  SUM(\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        queue_wait_ms > 0\n",
+        "        OR provisioning_wait_ms > 0\n",
+        "      THEN\n",
+        "        1\n",
+        "      ELSE 0\n",
+        "    END\n",
+        "  )\n",
+        "    / GREATEST(COUNT(DISTINCT elapsed_sec), 1) AS queued_per_sec\n",
+        "FROM\n",
+        "  base_a\n",
+        "GROUP BY\n",
+        "  target_concurrency\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  'Run B' AS run_label,\n",
+        "  target_concurrency,\n",
+        "  SUM(\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        queue_wait_ms > 0\n",
+        "        OR provisioning_wait_ms > 0\n",
+        "      THEN\n",
+        "        1\n",
+        "      ELSE 0\n",
+        "    END\n",
+        "  )\n",
+        "    / GREATEST(COUNT(DISTINCT elapsed_sec), 1) AS queued_per_sec\n",
+        "FROM\n",
+        "  base_b\n",
+        "GROUP BY\n",
+        "  target_concurrency\n",
+        "ORDER BY\n",
+        "  target_concurrency"
+      ],
+      "parameters": [
+        {
+          "displayName": "Run A",
+          "keyword": "run_id_a",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Run B",
+          "keyword": "run_id_b",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        }
+      ],
+      "catalog": "main",
+      "schema": "default"
+    },
+    {
+      "name": "client_vs_server",
+      "displayName": "Client vs Server Latency by Concurrency",
+      "queryLines": [
+        "WITH base AS (\n",
+        "  SELECT\n",
+        "    run_id,\n",
+        "    CASE\n",
+        "      WHEN run_id = split_part(:run_id_a, ' | ', 1) THEN 'Run A'\n",
+        "      ELSE 'Run B'\n",
+        "    END AS run_label,\n",
+        "    target_concurrency,\n",
+        "    latency_ms,\n",
+        "    server_total_time_ms\n",
+        "  FROM\n",
+        "    sql_benchmark_results\n",
+        "  WHERE\n",
+        "    run_id IN (split_part(:run_id_a, ' | ', 1), split_part(:run_id_b, ' | ', 1))\n",
+        "    AND server_total_time_ms IS NOT NULL\n",
+        "),\n",
+        "agg AS (\n",
+        "  SELECT\n",
+        "    run_label,\n",
+        "    target_concurrency,\n",
+        "    approx_percentile(latency_ms, 0.5) AS p50_client_ms,\n",
+        "    approx_percentile(server_total_time_ms, 0.5) AS p50_server_ms\n",
+        "  FROM\n",
+        "    base\n",
+        "  GROUP BY\n",
+        "    run_label,\n",
+        "    target_concurrency\n",
+        ")\n",
+        "SELECT\n",
+        "  target_concurrency,\n",
+        "  series,\n",
+        "  latency_ms\n",
+        "FROM\n",
+        "  (\n",
+        "    SELECT\n",
+        "      target_concurrency,\n",
+        "      CONCAT(run_label, ' - Client') AS series,\n",
+        "      p50_client_ms AS latency_ms\n",
+        "    FROM\n",
+        "      agg\n",
+        "    UNION ALL\n",
+        "    SELECT\n",
+        "      target_concurrency,\n",
+        "      CONCAT(run_label, ' - Server') AS series,\n",
+        "      p50_server_ms AS latency_ms\n",
+        "    FROM\n",
+        "      agg\n",
+        "  )\n",
+        "ORDER BY\n",
+        "  target_concurrency"
+      ],
+      "parameters": [
+        {
+          "displayName": "Run A",
+          "keyword": "run_id_a",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Run B",
+          "keyword": "run_id_b",
+          "dataType": "STRING",
+          "defaultSelection": {}
+        }
+      ],
+      "catalog": "main",
+      "schema": "default"
+    }
+  ],
+  "pages": [
+    {
+      "name": "7968c823",
+      "displayName": "Page 1",
+      "layout": [
+        {
+          "widget": {
+            "name": "header",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## SQL Warehouse Benchmark Results\n",
+                "Compare two load-test runs side by side, or review the last 10 runs below."
+              ],
+              "verticalAlign": "VERTICAL_ALIGN_CENTER"
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "last_10_runs_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "last_10_runs",
+                  "fields": [
+                    {
+                      "name": "run_start_ts",
+                      "expression": "`run_start_ts`"
+                    },
+                    {
+                      "name": "run_name",
+                      "expression": "`run_name`"
+                    },
+                    {
+                      "name": "run_id",
+                      "expression": "`run_id`"
+                    },
+                    {
+                      "name": "warehouse_size",
+                      "expression": "`warehouse_size`"
+                    },
+                    {
+                      "name": "total_queries",
+                      "expression": "`total_queries`"
+                    },
+                    {
+                      "name": "peak_concurrency",
+                      "expression": "`peak_concurrency`"
+                    },
+                    {
+                      "name": "p50_latency_ms",
+                      "expression": "`p50_latency_ms`"
+                    },
+                    {
+                      "name": "p90_latency_ms",
+                      "expression": "`p90_latency_ms`"
+                    },
+                    {
+                      "name": "p99_latency_ms",
+                      "expression": "`p99_latency_ms`"
+                    },
+                    {
+                      "name": "throughput_qps",
+                      "expression": "`throughput_qps`"
+                    },
+                    {
+                      "name": "pct_qrc_hit",
+                      "expression": "`pct_qrc_hit`"
+                    },
+                    {
+                      "name": "pct_queued",
+                      "expression": "`pct_queued`"
+                    },
+                    {
+                      "name": "avg_queue_wait_ms",
+                      "expression": "`avg_queue_wait_ms`"
+                    },
+                    {
+                      "name": "client_vs_server_gap_ms",
+                      "expression": "`client_vs_server_gap_ms`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Last 10 Runs Summary",
+                "showTitle": true
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "run_start_ts"
+                  },
+                  {
+                    "fieldName": "run_name"
+                  },
+                  {
+                    "fieldName": "run_id"
+                  },
+                  {
+                    "fieldName": "warehouse_size"
+                  },
+                  {
+                    "fieldName": "total_queries"
+                  },
+                  {
+                    "fieldName": "peak_concurrency"
+                  },
+                  {
+                    "fieldName": "p50_latency_ms"
+                  },
+                  {
+                    "fieldName": "p90_latency_ms"
+                  },
+                  {
+                    "fieldName": "p99_latency_ms"
+                  },
+                  {
+                    "fieldName": "throughput_qps"
+                  },
+                  {
+                    "fieldName": "pct_qrc_hit"
+                  },
+                  {
+                    "fieldName": "pct_queued"
+                  },
+                  {
+                    "fieldName": "avg_queue_wait_ms"
+                  },
+                  {
+                    "fieldName": "client_vs_server_gap_ms"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 30,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "concurrency_chart",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "concurrency_comparison",
+                  "fields": [
+                    {
+                      "name": "run_label",
+                      "expression": "`run_label`"
+                    },
+                    {
+                      "name": "target_concurrency",
+                      "expression": "`target_concurrency`"
+                    },
+                    {
+                      "name": "sum(p50_latency_ms)",
+                      "expression": "SUM(`p50_latency_ms`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Median Latency by Concurrency Step",
+                "showTitle": true
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "target_concurrency",
+                  "displayName": "target_concurrency",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(p50_latency_ms)",
+                  "displayName": "p50_latency_ms",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "run_label",
+                  "displayName": "run_label",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_run_a",
+            "queries": [
+              {
+                "name": "dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d9626613bfaa6300107d714e6f_run_label",
+                "query": {
+                  "datasetName": "run_options",
+                  "fields": [
+                    {
+                      "name": "run_label",
+                      "expression": "`run_label`"
+                    },
+                    {
+                      "name": "run_label_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d961f2197c9640428d78131dab_run_id_a",
+                "query": {
+                  "datasetName": "run_a_stats",
+                  "parameters": [
+                    {
+                      "name": "run_id_a",
+                      "keyword": "run_id_a"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d961ba1029bc18df256fd5281b_run_id_a",
+                "query": {
+                  "datasetName": "concurrency_comparison",
+                  "parameters": [
+                    {
+                      "name": "run_id_a",
+                      "keyword": "run_id_a"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196e3d5591e8391ab3985dd22236e_run_id_a",
+                "query": {
+                  "datasetName": "run_comparison_vertical",
+                  "parameters": [
+                    {
+                      "name": "run_id_a",
+                      "keyword": "run_id_a"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196ec65d9159da5403493ca4895a0_run_id_a",
+                "query": {
+                  "datasetName": "ramp_curve_a",
+                  "parameters": [
+                    {
+                      "name": "run_id_a",
+                      "keyword": "run_id_a"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196ee8fea1b5997541a235c230bc0_run_id_a",
+                "query": {
+                  "datasetName": "queued_by_concurrency",
+                  "parameters": [
+                    {
+                      "name": "run_id_a",
+                      "keyword": "run_id_a"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196f24a5710a7b8eb614ef16fa1e2_run_id_a",
+                "query": {
+                  "datasetName": "client_vs_server",
+                  "parameters": [
+                    {
+                      "name": "run_id_a",
+                      "keyword": "run_id_a"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Select Run A",
+                "showTitle": true
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "run_label",
+                    "queryName": "dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d9626613bfaa6300107d714e6f_run_label"
+                  },
+                  {
+                    "parameterName": "run_id_a",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d961f2197c9640428d78131dab_run_id_a"
+                  },
+                  {
+                    "parameterName": "run_id_a",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d961ba1029bc18df256fd5281b_run_id_a"
+                  },
+                  {
+                    "parameterName": "run_id_a",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196e3d5591e8391ab3985dd22236e_run_id_a"
+                  },
+                  {
+                    "parameterName": "run_id_a",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196ec65d9159da5403493ca4895a0_run_id_a"
+                  },
+                  {
+                    "parameterName": "run_id_a",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196ee8fea1b5997541a235c230bc0_run_id_a"
+                  },
+                  {
+                    "parameterName": "run_id_a",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196f24a5710a7b8eb614ef16fa1e2_run_id_a"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_run_b",
+            "queries": [
+              {
+                "name": "dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d9626613bfaa6300107d714e6f_run_label",
+                "query": {
+                  "datasetName": "run_options",
+                  "fields": [
+                    {
+                      "name": "run_label",
+                      "expression": "`run_label`"
+                    },
+                    {
+                      "name": "run_label_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d9622c1c898eebbde95c635906_run_id_b",
+                "query": {
+                  "datasetName": "run_b_stats",
+                  "parameters": [
+                    {
+                      "name": "run_id_b",
+                      "keyword": "run_id_b"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d961ba1029bc18df256fd5281b_run_id_b",
+                "query": {
+                  "datasetName": "concurrency_comparison",
+                  "parameters": [
+                    {
+                      "name": "run_id_b",
+                      "keyword": "run_id_b"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196e3d5591e8391ab3985dd22236e_run_id_b",
+                "query": {
+                  "datasetName": "run_comparison_vertical",
+                  "parameters": [
+                    {
+                      "name": "run_id_b",
+                      "keyword": "run_id_b"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196ed049d1b0aa4949052d118036c_run_id_b",
+                "query": {
+                  "datasetName": "ramp_curve_b",
+                  "parameters": [
+                    {
+                      "name": "run_id_b",
+                      "keyword": "run_id_b"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196ee8fea1b5997541a235c230bc0_run_id_b",
+                "query": {
+                  "datasetName": "queued_by_concurrency",
+                  "parameters": [
+                    {
+                      "name": "run_id_b",
+                      "keyword": "run_id_b"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196f24a5710a7b8eb614ef16fa1e2_run_id_b",
+                "query": {
+                  "datasetName": "client_vs_server",
+                  "parameters": [
+                    {
+                      "name": "run_id_b",
+                      "keyword": "run_id_b"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Select Run B",
+                "showTitle": true
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "run_label",
+                    "queryName": "dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d9626613bfaa6300107d714e6f_run_label"
+                  },
+                  {
+                    "parameterName": "run_id_b",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d9622c1c898eebbde95c635906_run_id_b"
+                  },
+                  {
+                    "parameterName": "run_id_b",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196d961ba1029bc18df256fd5281b_run_id_b"
+                  },
+                  {
+                    "parameterName": "run_id_b",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196e3d5591e8391ab3985dd22236e_run_id_b"
+                  },
+                  {
+                    "parameterName": "run_id_b",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196ed049d1b0aa4949052d118036c_run_id_b"
+                  },
+                  {
+                    "parameterName": "run_id_b",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196ee8fea1b5997541a235c230bc0_run_id_b"
+                  },
+                  {
+                    "parameterName": "run_id_b",
+                    "queryName": "parameter_dashboards/01f196d8d7291c20be04d147d3fd97a1/datasets/01f196f24a5710a7b8eb614ef16fa1e2_run_id_b"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "run_comparison_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "run_comparison_vertical",
+                  "fields": [
+                    {
+                      "name": "metric",
+                      "expression": "`metric`"
+                    },
+                    {
+                      "name": "run_a",
+                      "expression": "`run_a`"
+                    },
+                    {
+                      "name": "run_b",
+                      "expression": "`run_b`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Run A vs Run B",
+                "showTitle": true
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "metric"
+                  },
+                  {
+                    "fieldName": "run_a"
+                  },
+                  {
+                    "fieldName": "run_b"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "ramp_curve_chart",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ramp_curve_a",
+                  "fields": [
+                    {
+                      "name": "elapsed_sec",
+                      "expression": "`elapsed_sec`"
+                    },
+                    {
+                      "name": "concurrency",
+                      "expression": "`concurrency`"
+                    },
+                    {
+                      "name": "p50_latency_ms",
+                      "expression": "`p50_latency_ms`"
+                    },
+                    {
+                      "name": "p90_latency_ms",
+                      "expression": "`p90_latency_ms`"
+                    },
+                    {
+                      "name": "p99_latency_ms",
+                      "expression": "`p99_latency_ms`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "frame": {
+                "title": "Run A: Concurrency Ramp-Up vs Latency",
+                "showTitle": true
+              },
+              "widgetType": "combo",
+              "encodings": {
+                "x": {
+                  "fieldName": "elapsed_sec",
+                  "displayName": "Elapsed (sec)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "primary": {
+                    "fields": [
+                      {
+                        "fieldName": "concurrency",
+                        "displayName": "Concurrency"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    },
+                    "axis": {
+                      "title": "Concurrency"
+                    }
+                  },
+                  "secondary": {
+                    "fields": [
+                      {
+                        "fieldName": "p50_latency_ms",
+                        "displayName": "P50 Latency (ms)"
+                      },
+                      {
+                        "fieldName": "p90_latency_ms",
+                        "displayName": "P90 Latency (ms)"
+                      },
+                      {
+                        "fieldName": "p99_latency_ms",
+                        "displayName": "P99 Latency (ms)"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    },
+                    "axis": {
+                      "title": "Latency (ms)"
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "ramp_curve_chart_b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ramp_curve_b",
+                  "fields": [
+                    {
+                      "name": "elapsed_sec",
+                      "expression": "`elapsed_sec`"
+                    },
+                    {
+                      "name": "concurrency",
+                      "expression": "`concurrency`"
+                    },
+                    {
+                      "name": "p50_latency_ms",
+                      "expression": "`p50_latency_ms`"
+                    },
+                    {
+                      "name": "p90_latency_ms",
+                      "expression": "`p90_latency_ms`"
+                    },
+                    {
+                      "name": "p99_latency_ms",
+                      "expression": "`p99_latency_ms`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "frame": {
+                "title": "Run B: Concurrency Ramp-Up vs Latency",
+                "showTitle": true
+              },
+              "widgetType": "combo",
+              "encodings": {
+                "x": {
+                  "fieldName": "elapsed_sec",
+                  "displayName": "Elapsed (sec)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "primary": {
+                    "fields": [
+                      {
+                        "fieldName": "concurrency",
+                        "displayName": "Concurrency"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    },
+                    "axis": {
+                      "title": "Concurrency"
+                    }
+                  },
+                  "secondary": {
+                    "fields": [
+                      {
+                        "fieldName": "p50_latency_ms",
+                        "displayName": "P50 Latency (ms)"
+                      },
+                      {
+                        "fieldName": "p90_latency_ms",
+                        "displayName": "P90 Latency (ms)"
+                      },
+                      {
+                        "fieldName": "p99_latency_ms",
+                        "displayName": "P99 Latency (ms)"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    },
+                    "axis": {
+                      "title": "Latency (ms)"
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "queued_pct_chart",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "queued_by_concurrency",
+                  "fields": [
+                    {
+                      "name": "run_label",
+                      "expression": "`run_label`"
+                    },
+                    {
+                      "name": "target_concurrency",
+                      "expression": "`target_concurrency`"
+                    },
+                    {
+                      "name": "queued_per_sec",
+                      "expression": "`queued_per_sec`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Queued Queries/sec by Concurrency Step",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "target_concurrency",
+                  "displayName": "Concurrency",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "queued_per_sec",
+                  "displayName": "Queued Queries/sec",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "run_label",
+                  "displayName": "Run",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 25,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "client_vs_server_chart",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "client_vs_server",
+                  "fields": [
+                    {
+                      "name": "series",
+                      "expression": "`series`"
+                    },
+                    {
+                      "name": "target_concurrency",
+                      "expression": "`target_concurrency`"
+                    },
+                    {
+                      "name": "latency_ms",
+                      "expression": "`latency_ms`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Client Latency vs Server Time by Concurrency",
+                "showTitle": true
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "target_concurrency",
+                  "displayName": "Concurrency",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "latency_ms",
+                  "displayName": "P50 Latency (ms)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "series",
+                  "displayName": "Series",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 12,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
